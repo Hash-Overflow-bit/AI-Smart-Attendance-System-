@@ -4,6 +4,20 @@ import json
 
 router = APIRouter()
 
+@router.post("/enroll")
+async def enroll_student(data: dict):
+    """
+    Endpoint to enroll a new student with multiple face samples.
+    """
+    student_id = data.get("studentId")
+    images = data.get("images", [])
+    
+    if not student_id or not images:
+        return {"status": "error", "message": "studentId and images are required"}
+        
+    result = ml_service.enroll_student(student_id, images)
+    return result
+
 @router.websocket("/ws/detect")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

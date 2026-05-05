@@ -11,6 +11,7 @@ import LiveClassroom from './pages/dashboard/LiveClassroom';
 import AttentionAnalysis from './pages/dashboard/AttentionAnalysis';
 import ReportsLogs from './pages/dashboard/ReportsLogs';
 import SystemSettings from './pages/dashboard/SystemSettings';
+import StudentManagement from './pages/dashboard/StudentManagement';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<DashboardHome />} />
+          <Route path="students" element={<StudentManagement />} />
           <Route path="enrollment" element={<FaceEnrollment />} />
           <Route path="courses" element={<CourseDashboard />} />
           <Route path="live" element={<LiveClassroom />} />

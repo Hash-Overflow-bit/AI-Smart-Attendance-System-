@@ -15,7 +15,8 @@ import {
   CalendarDays,
   LayoutGrid,
   List,
-  Filter
+  Filter,
+  AlertCircle
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
@@ -54,14 +55,27 @@ export default function CourseDashboard() {
       id: Math.random().toString(36).substr(2, 9),
       code: formData.get('code'),
       name: formData.get('name'),
-      instructor: 'Current Instructor',
+      instructor: formData.get('instructor') || 'Dr. Unassigned',
       students: 0,
-      attendance: 0,
+      attendance: 75, // Default starting point
       slots: formData.get('slots').split(',').map(s => s.trim())
     };
     setCourses([...courses, newCourse]);
     setIsAddModalOpen(false);
     toast.success('Course added successfully!');
+  };
+
+  const handleDeleteCourse = (id) => {
+    if (window.confirm('Are you sure you want to delete this course? All associated records will be lost.')) {
+      setCourses(courses.filter(c => c.id !== id));
+      toast.success('Course deleted');
+      setSelectedCourse(null);
+    }
+  };
+
+  const handleUpdateCourse = (id, updatedData) => {
+    setCourses(courses.map(c => c.id === id ? { ...c, ...updatedData } : c));
+    toast.success('Course updated');
   };
 
   return (
@@ -124,6 +138,23 @@ export default function CourseDashboard() {
            </div>
         </div>
       </div>
+      
+      {/* Requirement 5.5: Alert System - Low Attendance Courses */}
+      {courses.some(c => c.attendance < 80) && (
+        <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top duration-500">
+           <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center">
+                 <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                 <p className="text-sm font-bold text-rose-800">Low Engagement Warning</p>
+                 <p className="text-xs text-rose-600">One or more courses have fallen below the 80% attendance threshold.</p>
+              </div>
+           </div>
+           <Button variant="outline" size="sm" className="border-rose-200 text-rose-600 hover:bg-rose-100">Review At-Risk Students</Button>
+        </div>
+      )}
+
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
@@ -151,8 +182,17 @@ export default function CourseDashboard() {
               onClick={() => setSelectedCourse(course)}
               className="group bg-white rounded-[32px] border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all cursor-pointer relative overflow-hidden"
             >
-              <div className="absolute top-0 right-0 p-6">
-                <button className="text-slate-300 hover:text-slate-600 transition-colors">
+              <div className="absolute top-0 right-0 p-6 flex gap-2">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteCourse(course.id);
+                  }}
+                  className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+                <button className="text-slate-300 hover:text-slate-600 transition-colors p-1">
                   <MoreVertical className="w-5 h-5" />
                 </button>
               </div>
@@ -285,6 +325,10 @@ export default function CourseDashboard() {
                     </div>
                  </div>
                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-700">Instructor Name</label>
+                    <input name="instructor" required placeholder="e.g. Dr. Usman Ali" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm" />
+                 </div>
+                 <div className="space-y-2">
                     <label className="text-sm font-semibold text-slate-700">Time Slots (Comma separated)</label>
                     <input name="slots" required placeholder="Mon 10:00 AM, Wed 10:00 AM" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm" />
                  </div>
@@ -320,7 +364,7 @@ export default function CourseDashboard() {
                  <div className="grid grid-cols-3 gap-4">
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Attendance</p>
-                       <p className="text-2xl font-bold text-emerald-600">{selectedCourse.attendance}%</p>
+                       <p className={`text-2xl font-bold ${selectedCourse.attendance < 75 ? 'text-red-500' : 'text-emerald-600'}`}>{selectedCourse.attendance}%</p>
                     </div>
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Late Rate</p>
@@ -349,7 +393,7 @@ export default function CourseDashboard() {
                          { id: '2', name: 'Ayesha Bibi', studentId: 'STU-014', attendance: 82, present: 16, absent: 4 },
                          { id: '3', name: 'Zainab Ahmed', studentId: 'STU-022', attendance: 64, present: 12, absent: 8 },
                        ].map(student => (
-                         <div key={student.id} className="p-5 border border-slate-100 rounded-2xl hover:border-blue-200 hover:bg-blue-50/5 transition-all group relative">
+                         <div key={student.id} className={`p-5 border rounded-2xl hover:border-blue-200 hover:bg-blue-50/5 transition-all group relative ${student.attendance < 75 ? 'border-red-100 bg-red-50/10' : 'border-slate-100'}`}>
                             <div className="flex items-center justify-between mb-4">
                                <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-xs">
@@ -360,7 +404,7 @@ export default function CourseDashboard() {
                                      <p className="text-xs text-slate-400 font-medium">{student.studentId}</p>
                                   </div>
                                </div>
-                               <Badge variant={student.attendance > 80 ? 'success' : 'warning'} className="font-bold">
+                               <Badge variant={student.attendance < 75 ? 'error' : student.attendance > 80 ? 'success' : 'warning'} className="font-bold">
                                   {student.attendance}% Rate
                                </Badge>
                             </div>
@@ -399,8 +443,21 @@ export default function CourseDashboard() {
               </div>
               
               <div className="p-8 border-t border-slate-100 bg-slate-50/50">
-                 <Button variant="primary" className="w-full py-4 text-base" onClick={() => toast.success('Sending attendance reminder to students...')}>
-                    Send Module Reports
+                 <Button 
+                    variant="primary" 
+                    className="w-full py-4 text-base" 
+                    onClick={() => {
+                      toast.promise(
+                        new Promise(resolve => setTimeout(resolve, 1500)),
+                        {
+                          loading: 'Aggregating module metrics...',
+                          success: 'Module reports generated and sent to Registry.',
+                          error: 'Failed to generate reports.',
+                        }
+                      );
+                    }}
+                  >
+                     Send Module Reports
                  </Button>
               </div>
            </div>

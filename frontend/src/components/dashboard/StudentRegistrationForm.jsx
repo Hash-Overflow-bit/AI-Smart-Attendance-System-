@@ -1,28 +1,44 @@
-import React, { useState } from 'react';
-import { UserCheck, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { UserCheck, AlertCircle, User, Mail, Hash, BookOpen, Building2 } from 'lucide-react';
 import Input from '../ui/Input';
-import Select from '../ui/Select';
 import Button from '../ui/Button';
 
-export default function StudentRegistrationForm({ onSubmit, existingIds = [] }) {
+export default function StudentRegistrationForm({ onSubmit, courses = [] }) {
   const [formData, setFormData] = useState({
-    studentId: '',
     name: '',
+    email: '',
     rollNo: '',
-    courseCode: '',
-    department: ''
+    courseId: '',
+    department: 'Computer Science'
   });
+
   const [errors, setErrors] = useState({});
 
   const validate = () => {
     const newErrors = {};
-    if (!formData.studentId.trim()) newErrors.studentId = 'Student ID is required';
-    if (existingIds.includes(formData.studentId.trim())) newErrors.studentId = 'This Student ID is already enrolled.';
     
     if (!formData.name.trim()) newErrors.name = 'Full Name is required';
-    if (!formData.rollNo.trim()) newErrors.rollNo = 'Roll Number is required';
-    if (!formData.courseCode.trim()) newErrors.courseCode = 'Course Code is required';
-    if (!formData.department) newErrors.department = 'Please select a department';
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email Address is required';
+    } else if (!emailRegex.test(formData.email)) {
+      newErrors.email = 'Invalid email format (user@domain.com)';
+    }
+
+    if (!formData.rollNo.trim()) {
+      newErrors.rollNo = 'Roll Number is required';
+    } else if (!/^[a-zA-Z0-9-]+$/.test(formData.rollNo)) {
+      newErrors.rollNo = 'Format must be alphanumeric (e.g. CS-101)';
+    }
+
+    if (!formData.courseId) newErrors.courseId = 'Please assign a course';
+    
+    // Check if Roll Number already exists in local registry
+    const existing = JSON.parse(localStorage.getItem('smart_attendance_enrolled_students') || '[]');
+    if (existing.some(s => s.rollNo.toLowerCase() === formData.rollNo.toLowerCase())) {
+      newErrors.rollNo = 'Duplicate Entry: Roll Number already exists';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -31,80 +47,28 @@ export default function StudentRegistrationForm({ onSubmit, existingIds = [] }) 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validate()) {
-      onSubmit(formData);
+      // System auto-generates Student ID (STU-XXXX) derived from Roll Number
+      const studentData = {
+        ...formData,
+        studentId: `STU-${formData.rollNo.toUpperCase()}`,
+        status: 'Pending', // Lifecycle Status: Initial state
+        id: Math.random().toString(36).substr(2, 9)
+      };
+      onSubmit(studentData);
     }
   };
 
   const handleChange = (e) => {
     const { id, value } = e.target;
     setFormData(prev => ({ ...prev, [id]: value }));
-    // Clear error for field when user starts typing
     if (errors[id]) {
       setErrors(prev => ({ ...prev, [id]: undefined }));
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-md mx-auto space-y-5 text-left text-sm z-10 relative">
+    <form onSubmit={handleSubmit} className="w-full max-w-md mx-auto space-y-4 text-left">
       <div className="text-center mb-6">
-        <h3 className="text-xl font-bold text-slate-900 mb-1">Student Details</h3>
-        <p className="text-slate-500">Enter information before capturing face embeddings.</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Input 
-          id="studentId"
-          label="Student ID"
-          placeholder="e.g. STU-2023-014"
-          value={formData.studentId}
-          onChange={handleChange}
-          error={errors.studentId}
-        />
-        
-        <Input 
-          id="rollNo"
-          label="Roll / Seat Number"
-          placeholder="e.g. BESE-10C"
-          value={formData.rollNo}
-          onChange={handleChange}
-          error={errors.rollNo}
-        />
-        
-        <Input 
-          id="name"
-          label="Full Name"
-          placeholder="e.g. Ali Khan"
-          value={formData.name}
-          onChange={handleChange}
-          error={errors.name}
-          className="col-span-2"
-        />
-
-        <Input 
-          id="courseCode"
-          label="Course / Course Code"
-          placeholder="e.g. CS-301"
-          value={formData.courseCode}
-          onChange={handleChange}
-          error={errors.courseCode}
-        />
-
-        <Select 
-          id="department"
-          label="Department"
-          value={formData.department}
-          onChange={handleChange}
-          error={errors.department}
-          options={[
-            { value: 'software', label: 'Software Engineering' },
-            { value: 'computer', label: 'Computer Science' },
-            { value: 'electrical', label: 'Electrical Engineering' },
-            { value: 'business', label: 'Business Administration' }
-          ]}
-        />
-      </div>
-
-      <div className="pt-4 border-t border-slate-100 mt-6">
         <Button type="submit" variant="primary" icon={UserCheck} className="w-full h-11 text-base">
           Proceed to Face Capture
         </Button>

@@ -142,45 +142,57 @@ export default function FaceEnrollment() {
                   
                   <WebcamCapture 
                      onCancel={() => setCaptureStep('form')}
-                     onCaptureComplete={(images) => {
-                       // Successfully captured, notify user and reset form
-                       toast.success(`Successfully enrolled student ${currentStudent?.name}!`);
+                     onCaptureComplete={async (images) => {
+                       // 1. Initial State: Processing
+                       const loadingToast = toast.loading(`Initializing Enrollment for ${currentStudent?.name}...`);
                        
-                       // Add to dynamic table state!
-                       const newStudent = {
-                         id: Math.random().toString(36).substr(2, 9),
-                         name: currentStudent.name,
-                         studentId: currentStudent.studentId,
-                         rollNo: currentStudent.rollNo,
-                         courseCode: currentStudent.courseCode,
-                         department: currentStudent.department,
-                         status: 'Enrolled',
-                         embeddings: 'Generated',
-                         attendance: '-',
-                         image: currentStudent.name.substring(0,2).toUpperCase()
-                       };
-                       
-                       const updatedList = [newStudent, ...studentsList];
-                       setStudentsList(updatedList);
-                       localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
+                       try {
+                         // 2. Simulated Pipeline Step: Normalization
+                         await new Promise(resolve => setTimeout(resolve, 1200));
+                         toast.loading("Preprocessing images (160x160 normalization)...", { id: loadingToast });
 
-                       // 🔄 Update Course Statistics
-                       const savedCourses = localStorage.getItem('smart_attendance_courses');
-                       if (savedCourses && currentStudent?.courseCode) {
-                         try {
-                           const courses = JSON.parse(savedCourses);
-                           const updatedCourses = courses.map(course => {
-                             if (course.code.toLowerCase() === currentStudent.courseCode.toLowerCase()) {
-                               return { ...course, students: (course.students || 0) + 1 };
-                             }
-                             return course;
-                           });
-                           localStorage.setItem('smart_attendance_courses', JSON.stringify(updatedCourses));
-                         } catch (e) { console.error('Failed to update course registry', e); }
+                         // 3. Simulated Pipeline Step: Quality Check (Blur/Multi-face)
+                         await new Promise(resolve => setTimeout(resolve, 1500));
+                         
+                         // Mocking a possible quality failure (5% chance)
+                         if (Math.random() < 0.05) {
+                            throw new Error("Quality check failed: 3 frames were too blurry. Please retry.");
+                         }
+                         toast.loading("Applying Laplacian Variance check & face validation...", { id: loadingToast });
+
+                         // 4. Simulated Pipeline Step: Embedding Generation
+                         await new Promise(resolve => setTimeout(resolve, 2000));
+                         toast.loading("Generating 128-dimensional face embeddings...", { id: loadingToast });
+
+                         // 5. Finalize Enrollment
+                         await new Promise(resolve => setTimeout(resolve, 1000));
+                         
+                         const newStudent = {
+                           id: Math.random().toString(36).substr(2, 9),
+                           name: currentStudent.name,
+                           studentId: currentStudent.studentId,
+                           rollNo: currentStudent.rollNo,
+                           courseCode: currentStudent.courseCode,
+                           department: currentStudent.department,
+                           status: 'Enrolled',
+                           embeddings: 'Active',
+                           lastEnrollment: new Date().toISOString(),
+                           attendance: '0%',
+                           image: currentStudent.name.substring(0,2).toUpperCase()
+                         };
+                         
+                         const updatedList = [newStudent, ...studentsList];
+                         setStudentsList(updatedList);
+                         localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
+
+                         toast.success(`${currentStudent?.name} successfully enrolled!`, { id: loadingToast });
+                         
+                         setCaptureStep('form');
+                         setCurrentStudent(null);
+                       } catch (error) {
+                         toast.error(error.message || "Enrollment failed. Face detection lost.", { id: loadingToast });
+                         // Optionally log failed status if we were tracking partials
                        }
-                       
-                       setCaptureStep('form');
-                       setCurrentStudent(null);
                      }}
                   />
                   {/* Provide a simulate failure button during dev so you can test error states */}

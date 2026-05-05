@@ -26,7 +26,7 @@ export default function Sidebar({ isCollapsed }) {
     {
       category: "MANAGEMENT",
       items: [
-        { name: "Students", path: "/dashboard/enrollment", icon: Users },
+        { name: "Students", path: "/dashboard/students", icon: Users },
         { name: "Courses", path: "/dashboard/courses", icon: BookOpen },
         { name: "Attendance", path: "/dashboard/attendance", icon: ClipboardList }
       ]

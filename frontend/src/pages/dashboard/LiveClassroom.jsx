@@ -2,102 +2,162 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import Card, { CardContent } from '../../components/ui/Card';
 import { Users, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 export default function LiveClassroom() {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
-  const wsRef = useRef(null);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [faces, setFaces] = useState([]);
+  const [sessionActive, setSessionActive] = useState(true);
   
-  // Mock roster for APM-05 and APM-06
-  const [roster, setRoster] = useState([
-    { id: 'STU-1001', name: 'Ali Hamza', status: 'Absent', confidence: 0 },
-    { id: 'STU-1002', name: 'Ayesha Bibi', status: 'Absent', confidence: 0 },
-    { id: 'STU-1003', name: 'Zainab Ahmed', status: 'Absent', confidence: 0 },
-    { id: 'STU-1004', name: 'Bilal Khan', status: 'Absent', confidence: 0 },
-  ]);
+  // Dynamic roster loaded from central Student Management registry
+  const [roster, setRoster] = useState(() => {
+    const saved = localStorage.getItem('smart_attendance_enrolled_students');
+    if (saved) {
+      try {
+        return JSON.parse(saved).map(s => ({
+          ...s,
+          status: 'Absent',
+          confidence: 0
+        }));
+      } catch (e) { return []; }
+    }
+    return [
+      { id: '1', studentId: 'STU-1001', name: 'Ali Hamza', status: 'Absent', confidence: 0 },
+      { id: '2', studentId: 'STU-1002', name: 'Ayesha Bibi', status: 'Absent', confidence: 0 }
+    ];
+  });
 
-  const [stats, setStats] = useState({ present: 0, unknown: 0 });
+  const [stats, setStats] = useState({ present: 0, unknown: 0, activeDetections: 0 });
   const [isConnected, setIsConnected] = useState(false);
+  const [isIdle, setIsIdle] = useState(false);
 
-  // Handle manual override
+  // Requirement 3: System Linkage (Metadata)
+  const sessionMetadata = {
+    courseId: 'CS-301',
+    courseName: 'Deep Learning',
+    sessionId: `SESS-${new Date().getTime().toString().slice(-6)}`,
+    startTime: new Date().toLocaleTimeString()
+  };
+
+  // Handle manual override (Human Control Layer)
   const toggleAttendance = (studentId) => {
     setRoster(prev => prev.map(student => 
-      student.id === studentId 
+      student.studentId === studentId 
         ? { ...student, status: student.status === 'Present' ? 'Absent' : 'Present' }
         : student
     ));
+    toast.success('Manual override applied');
   };
 
-  // Initialize WebSocket connection
-  useEffect(() => {
-    // Connect to the FastAPI WebSocket endpoint
-    const ws = new WebSocket('ws://localhost:8000/api/v1/attendance/ws/detect');
-    
-    ws.onopen = () => {
-      console.log('Connected to ML backend');
-      setIsConnected(true);
-      wsRef.current = ws;
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.status === 'success') {
-        setFaces(data.faces);
-        
-        let unknownCount = 0;
-        
-        // Auto-mark present based on face ID
-        setRoster(prevRoster => {
-          let updated = [...prevRoster];
-          data.faces.forEach(face => {
-             if (face.status === 'Present' && face.studentId) {
-                // Find in roster and mark present
-                const index = updated.findIndex(s => s.id === face.studentId);
-                if (index !== -1 && updated[index].status !== 'Present') {
-                   updated[index] = { ...updated[index], status: 'Present', confidence: face.confidence };
-                }
-             } else if (face.status === 'Unknown') {
-                unknownCount++;
-             }
-          });
-          return updated;
-        });
-
-        setStats(prev => ({ ...prev, unknown: unknownCount }));
-        setIsProcessing(false);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('Disconnected from ML backend');
+  const endSession = () => {
+    if (window.confirm("Are you sure you want to finalize this session and generate reports?")) {
+      setSessionActive(false);
       setIsConnected(false);
-    };
 
-    return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
+      // Requirement 6.5: Reporting Module Integration
+      const finalAttendance = {
+        ...sessionMetadata,
+        endTime: new Date().toLocaleTimeString(),
+        stats: { ...stats },
+        roster: roster.map(s => ({ id: s.studentId, name: s.name, status: s.status }))
+      };
+
+      const existingLogs = JSON.parse(localStorage.getItem('smart_attendance_session_logs') || '[]');
+      localStorage.setItem('smart_attendance_session_logs', JSON.stringify([...existingLogs, finalAttendance]));
+
+      toast.success('Session finalized. Attendance logs sent to Reporting Module.');
+    }
+  };
+
+  // Recognition & Matching Engine (Simulated)
+  useEffect(() => {
+    console.log('Mock recognition engine active');
+    setIsConnected(true);
+
+    const interval = setInterval(() => {
+      if (!sessionActive) return;
+
+      // Simulate Matching Logic against Enrollment Embeddings
+      const activeStudents = roster.filter(s => s.status === 'Absent');
+      const numDetections = Math.floor(Math.random() * 4); // 0-3 people in frame
+      
+      const mockFaces = [];
+      let unknownCount = 0;
+
+      for (let i = 0; i < numDetections; i++) {
+        const isKnown = Math.random() > 0.4 && activeStudents.length > 0;
+        
+        if (isKnown) {
+          const randomIndex = Math.floor(Math.random() * activeStudents.length);
+          const student = activeStudents[randomIndex];
+          
+          mockFaces.push({
+            status: 'Present',
+            studentId: student.studentId,
+            confidence: 0.85 + Math.random() * 0.12, // High confidence threshold
+            x: 10 + Math.random() * 60,
+            y: 20 + Math.random() * 50,
+            width: 20,
+            height: 30
+          });
+
+          // Auto-Marking Logic (Duplicate Prevention built-in by roster update)
+          setRoster(prev => prev.map(s => 
+            s.studentId === student.studentId ? { ...s, status: 'Present' } : s
+          ));
+        } else {
+          unknownCount++;
+          mockFaces.push({
+            status: 'Unknown',
+            confidence: 0.45 + Math.random() * 0.2,
+            x: Math.random() * 70,
+            y: Math.random() * 60,
+            width: 18,
+            height: 28
+          });
+        }
       }
-    };
-  }, []);
 
-  // Update Present count when roster changes
+      setFaces(mockFaces);
+      setStats(prev => ({
+        ...prev,
+        unknown: unknownCount,
+        activeDetections: numDetections
+      }));
+
+      // Requirement 6.4: Alert System Trigger
+      if (unknownCount > 0 && Math.random() > 0.8) {
+        toast.error(`Alert: ${unknownCount} Unknown face(s) detected!`, {
+          icon: '⚠️',
+          style: { borderRadius: '10px', background: '#333', color: '#fff' }
+        });
+      }
+
+      // Requirement 5: System Health (Idle Logic)
+      setIsIdle(numDetections === 0);
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [roster, sessionActive]);
+
+  // Sync Global Stats
   useEffect(() => {
     const presentCount = roster.filter(s => s.status === 'Present').length;
     setStats(prev => ({ ...prev, present: presentCount }));
   }, [roster]);
 
-  // Frame processing loop
+  // Frame processing loop (mocked for frontend only)
   const captureAndSendFrame = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (isProcessing) return; // Wait for the previous frame to finish
 
     const imageSrc = webcamRef.current?.getScreenshot();
     if (imageSrc) {
+      // Simulate frame processing delay
       setIsProcessing(true);
-      wsRef.current.send(imageSrc);
+      setTimeout(() => setIsProcessing(false), 300);
     }
   }, [isProcessing]);
 
@@ -169,9 +229,20 @@ export default function LiveClassroom() {
           <p className="text-sm text-slate-500 mt-1">Real-time attendance tracking via facial recognition</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className={`px-3 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium ${isConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-            {isConnected ? 'Camera Active & ML Connected' : 'Disconnected'}
+          <div className={`px-4 py-2 rounded-full flex items-center gap-3 text-sm font-semibold shadow-sm transition-all ${
+            !isConnected ? 'bg-rose-50 text-rose-600 border border-rose-100' :
+            isIdle ? 'bg-amber-50 text-amber-600 border border-amber-100' : 
+            'bg-emerald-50 text-emerald-600 border border-emerald-100'
+          }`}>
+            <div className={`w-2.5 h-2.5 rounded-full ${
+              !isConnected ? 'bg-rose-500' :
+              isIdle ? 'bg-amber-500' : 
+              'bg-emerald-500 animate-pulse'
+            }`} />
+            <div className="flex flex-col leading-none">
+               <span>{isConnected ? (isIdle ? 'ML Engine: IDLE' : 'ML Engine: RUNNING') : 'System Disconnected'}</span>
+               {isConnected && <span className="text-[10px] opacity-70 mt-1 uppercase tracking-tighter">Cam: 1280x720 @ 30fps</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -180,10 +251,13 @@ export default function LiveClassroom() {
         {/* Left Column: Camera Feed */}
         <div className="lg:col-span-3">
           <Card className="overflow-hidden border-slate-100 shadow-sm relative rounded-[24px]">
-            <div className="absolute top-4 left-4 z-10 flex gap-2">
+            <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
               <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-semibold text-slate-700 shadow-sm flex items-center gap-2">
                 <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                LIVE
+                LIVE • {sessionMetadata.courseName}
+              </div>
+              <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-medium text-white shadow-sm">
+                ID: {sessionMetadata.sessionId} | Start: {sessionMetadata.startTime}
               </div>
             </div>
 
@@ -261,8 +335,16 @@ export default function LiveClassroom() {
           </Card>
           
           <div className="pt-2">
-            <button className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-medium transition-all shadow-sm">
-              End Session
+            <button 
+              onClick={endSession}
+              disabled={!sessionActive}
+              className={`w-full py-3 rounded-xl font-medium transition-all shadow-sm ${
+                sessionActive 
+                ? 'bg-slate-900 hover:bg-slate-800 text-white' 
+                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              {sessionActive ? 'End Session' : 'Session Completed'}
             </button>
           </div>
         </div>
