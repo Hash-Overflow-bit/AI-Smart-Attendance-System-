@@ -1,8 +1,42 @@
+# =============================================
+# Smart Attendance System — Backend Dependencies
+# Updated: 2026-06-04
+# =============================================
+
+# --- Core Framework ---
 fastapi>=0.109.0
 uvicorn>=0.27.0
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
 websockets>=12.0
+
+# --- Computer Vision & ML (existing) ---
 opencv-python-headless>=4.9.0
 mediapipe>=0.10.9
 numpy>=1.26.0
+
+# --- Database (PostgreSQL + ORM) ---
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+alembic>=1.13.1
+
+# --- Authentication (JWT + Password Hashing) ---
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+
+# --- Face Recognition Model ---
+torch>=2.1.0
+torchvision>=0.16.0
+facenet-pytorch>=2.5.3
+
+# --- File Export (CSV/PDF reports) ---
+reportlab>=4.1.0
+openpyxl>=3.1.2
+
+# --- Email (password reset, alerts) ---
+fastapi-mail>=1.4.1
+
+# --- Utilities ---
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
