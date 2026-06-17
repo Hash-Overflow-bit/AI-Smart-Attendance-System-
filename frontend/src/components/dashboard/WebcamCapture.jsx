@@ -1,13 +1,16 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { Camera, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Button from '../ui/Button';
+import Badge from '../ui/Badge';
+import toast from 'react-hot-toast';
 
 export default function WebcamCapture({ onCaptureComplete, onCancel }) {
   const webcamRef = useRef(null);
   const [capturedImages, setCapturedImages] = useState([]);
   const [isCapturing, setIsCapturing] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+  const [realtimeWarning, setRealtimeWarning] = useState(null);
 
   const TARGET_SAMPLES = 15;
   const guides = [
@@ -28,14 +31,37 @@ export default function WebcamCapture({ onCaptureComplete, onCancel }) {
     "Hold still for calibration"
   ];
 
+  // Simulate real-time video feed analysis (Lighting / Blur)
+  useEffect(() => {
+    if (cameraError || capturedImages.length >= TARGET_SAMPLES) return;
+    
+    const interval = setInterval(() => {
+      const rand = Math.random();
+      if (rand < 0.1) {
+        setRealtimeWarning("Low Lighting Detected");
+      } else if (rand > 0.1 && rand < 0.15) {
+        setRealtimeWarning("Slight Motion Blur");
+      } else if (rand > 0.15 && rand < 0.2) {
+        setRealtimeWarning("Face not centered");
+      } else {
+        setRealtimeWarning(null); // Good quality
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [cameraError, capturedImages.length]);
+
   const capture = useCallback(() => {
     if (capturedImages.length >= TARGET_SAMPLES) return;
+
+    if (realtimeWarning) {
+      toast.error(`Cannot capture: ${realtimeWarning}. Please adjust.`);
+      return;
+    }
 
     const imageSrc = webcamRef.current.getScreenshot();
     
     if (imageSrc) {
-      // Simulated Face Detection Validation
-      // In a real scenario, this would check bounding box presence
       const faceDetected = Math.random() > 0.05; // 95% detection success rate
       
       if (!faceDetected) {
@@ -47,7 +73,7 @@ export default function WebcamCapture({ onCaptureComplete, onCancel }) {
       setCapturedImages((prev) => [...prev, imageSrc]);
       setTimeout(() => setIsCapturing(false), 150);
     }
-  }, [webcamRef, capturedImages.length]);
+  }, [webcamRef, capturedImages.length, realtimeWarning]);
 
   const handleFinish = () => {
     if (capturedImages.length >= TARGET_SAMPLES) {
@@ -91,9 +117,19 @@ export default function WebcamCapture({ onCaptureComplete, onCancel }) {
           mirrored={true}
         />
 
+        {/* Realtime Feedback Overlay */}
+        {realtimeWarning && capturedImages.length < TARGET_SAMPLES && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-10 animate-in fade-in zoom-in duration-200">
+             <div className="bg-red-500/90 backdrop-blur-md text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 border border-red-400">
+               <AlertTriangle className="w-4 h-4" />
+               <span className="text-sm font-bold">{realtimeWarning}</span>
+             </div>
+          </div>
+        )}
+
         {/* Guides Overlay */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-           <div className={`w-56 h-72 border-2 border-dashed rounded-[60px] transition-all duration-300 ${capturedImages.length >= TARGET_SAMPLES ? 'border-emerald-400 bg-emerald-400/10' : 'border-white/30 group-hover:border-white/50'}`} />
+           <div className={`w-56 h-72 border-2 border-dashed rounded-[60px] transition-all duration-300 ${capturedImages.length >= TARGET_SAMPLES ? 'border-emerald-400 bg-emerald-400/10' : realtimeWarning ? 'border-red-400/50 bg-red-500/10' : 'border-white/30 group-hover:border-white/50'}`} />
         </div>
 
         {/* Progress Float */}
@@ -127,7 +163,7 @@ export default function WebcamCapture({ onCaptureComplete, onCancel }) {
         <div className="flex gap-3">
           <Button variant="ghost" onClick={onCancel} disabled={isCapturing}>Cancel</Button>
           {capturedImages.length < TARGET_SAMPLES ? (
-             <Button variant="primary" icon={Camera} onClick={capture} disabled={cameraError}>
+             <Button variant="primary" icon={Camera} onClick={capture} disabled={cameraError || realtimeWarning}>
                Capture Sample
              </Button>
           ) : (

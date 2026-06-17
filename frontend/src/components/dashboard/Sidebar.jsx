@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Eye, 
@@ -9,15 +9,37 @@ import {
   TriangleAlert,
   BarChart2, 
   Settings, 
-  LogOut 
+  LogOut,
+  User
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export default function Sidebar({ isCollapsed }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const userStr = localStorage.getItem('smart_attendance_user');
+    if (userStr) {
+      try {
+        setUser(JSON.parse(userStr));
+      } catch (e) {
+        console.error('Failed to parse user', e);
+      }
+    }
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('smart_attendance_token');
+    localStorage.removeItem('smart_attendance_user');
+    navigate('/login');
+  };
 
   const navLinks = [
     {
       category: "OVERVIEW",
+      roles: ['admin', 'teacher', 'counselor'],
       items: [
         { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
         { name: "Live Classroom", path: "/dashboard/live", icon: Eye }
@@ -25,6 +47,7 @@ export default function Sidebar({ isCollapsed }) {
     },
     {
       category: "MANAGEMENT",
+      roles: ['admin', 'teacher'],
       items: [
         { name: "Students", path: "/dashboard/students", icon: Users },
         { name: "Courses", path: "/dashboard/courses", icon: BookOpen },
@@ -33,6 +56,7 @@ export default function Sidebar({ isCollapsed }) {
     },
     {
       category: "ANALYTICS",
+      roles: ['admin', 'teacher', 'counselor'],
       items: [
         { name: "Attention", path: "/dashboard/attention", icon: BrainCircuit },
         { name: "Alerts", path: "/dashboard/alerts", icon: TriangleAlert },
@@ -41,11 +65,16 @@ export default function Sidebar({ isCollapsed }) {
     },
     {
       category: "SYSTEM",
+      roles: ['admin'],
       items: [
         { name: "Administration", path: "/dashboard/settings", icon: Settings }
       ]
     }
   ];
+
+  // Filter links based on user role (defaulting to show all if no user yet to avoid layout jumping)
+  const userRole = user?.role || 'admin';
+  const visibleLinks = navLinks.filter(section => !section.roles || section.roles.includes(userRole));
 
   return (
     <aside className={`fixed left-0 top-0 h-full w-[240px] bg-white border-r border-slate-200 flex flex-col z-20 transition-all duration-300 transform ${isCollapsed ? '-translate-x-full' : 'translate-x-0'}`}>
@@ -61,7 +90,7 @@ export default function Sidebar({ isCollapsed }) {
 
       {/* Navigation Links */}
       <div className="flex-1 overflow-y-auto w-full py-4 px-3 custom-scrollbar">
-        {navLinks.map((section, idx) => (
+        {visibleLinks.map((section, idx) => (
           <div key={idx} className="mb-6">
             <p className="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">
               {section.category}
@@ -92,10 +121,33 @@ export default function Sidebar({ isCollapsed }) {
         ))}
       </div>
 
-      {/* Footer / Sign Out */}
-      <div className="p-3 mb-2">
-        <button className="flex items-center gap-3.5 w-full px-3 py-[10px] rounded-xl text-[14.5px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors">
-          <LogOut className="w-5 h-5 stroke-[2] text-slate-400" />
+      {/* User Info & Sign Out */}
+      <div className="p-3 mb-2 border-t border-slate-100">
+        <Link 
+          to="/dashboard/profile"
+          className="flex items-center gap-3 px-3 py-2 mb-2 rounded-xl hover:bg-slate-50 transition-colors"
+        >
+          <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden flex items-center justify-center">
+             {user?.avatar_url ? (
+               <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+             ) : (
+               <User className="w-5 h-5 text-slate-500" />
+             )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-slate-900 truncate">
+              {user?.name || 'Loading...'}
+            </p>
+            <p className="text-[11px] text-slate-500 capitalize truncate">
+              {user?.role || 'User'}
+            </p>
+          </div>
+        </Link>
+        <button 
+          onClick={handleLogout}
+          className="flex items-center gap-3.5 w-full px-3 py-[10px] rounded-xl text-[14.5px] font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+        >
+          <LogOut className="w-5 h-5 stroke-[2]" />
           Sign Out
         </button>
       </div>

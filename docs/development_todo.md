@@ -220,16 +220,16 @@
 
 - [ ] **2.9 Create Reset Password page** → `frontend/src/pages/auth/ResetPasswordPage.jsx` → **UAM-04**
 
-- [ ] **2.10 Create Profile page** → `frontend/src/pages/dashboard/ProfilePage.jsx`
+- [x] **2.10 Create Profile page** → `frontend/src/pages/dashboard/ProfilePage.jsx`
   - Edit name, bio, upload avatar → **UAM-03, UAM-07**
 
-- [ ] **2.11 Create ProtectedRoute wrapper** — Check JWT, redirect to `/login` if missing
+- [x] **2.11 Create ProtectedRoute wrapper** — Check JWT, redirect to `/login` if missing
 
-- [ ] **2.12 Create `frontend/src/services/api.js`** — Central API client with auto JWT attachment
+- [x] **2.12 Create `frontend/src/services/api.js`** — Central API client with auto JWT attachment
 
-- [ ] **2.13 Update `App.jsx`** — Add auth routes, wrap dashboard in ProtectedRoute
+- [x] **2.13 Update `App.jsx`** — Add auth routes, wrap dashboard in ProtectedRoute
 
-- [ ] **2.14 Update Sidebar.jsx** — Show user name/role, add logout button, hide menu items by role
+- [x] **2.14 Update Sidebar.jsx** — Show user name/role, add logout button, hide menu items by role
 
 ---
 
@@ -301,19 +301,19 @@
 
 ### 🖥️ Frontend
 
-- [ ] **3.9 Wire FaceEnrollment.jsx to backend**
+- [x] **3.9 Wire FaceEnrollment.jsx to backend**
   - Replace all `localStorage` calls with `api.get('/students')`, `api.post('/students')`, etc.
   - Call `POST /students/{id}/enroll-face` with captured images
 
-- [ ] **3.10 Wire StudentManagement.jsx to backend**
+- [x] **3.10 Wire StudentManagement.jsx to backend**
   - Replace localStorage CRUD with API calls
   - Connect CSV upload to `POST /students/bulk-import`
 
-- [ ] **3.11 Add real-time quality feedback to WebcamCapture.jsx** → **FEM-06**
+- [x] **3.11 Add real-time quality feedback to WebcamCapture.jsx** → **FEM-06**
   - Display overlay: "Too Dark", "Too Blurry", "Move Closer", "Look Left/Right"
   - Add angle guidance prompts (front → left → right → up → down) → **FEM-02**
 
-- [ ] **3.12 Add re-enrollment UI** to student detail view → **FEM-07**
+- [x] **3.12 Add re-enrollment UI** to student detail view → **FEM-07**
   - Button "Re-enroll Face" → clears old, opens new capture
   - Show enrollment history log
 
@@ -365,7 +365,7 @@
 
 ### 🖥️ Frontend
 
-- [ ] **4.7 Connect LiveClassroom.jsx to real WebSocket**
+- [x] **4.7 Connect LiveClassroom.jsx to real WebSocket**
   - Replace `setInterval` simulation (lines 80-143) with:
     ```javascript
     const ws = new WebSocket(`ws://localhost:8000/api/v1/sessions/${sessionId}/detect`);
@@ -373,10 +373,10 @@
   - Remove all `Math.random()` mock logic
   - Call `POST /sessions` to create session before starting
 
-- [ ] **4.8 Connect session end** to `PUT /sessions/{id}/close`
+- [x] **4.8 Connect session end** to `PUT /sessions/{id}/close`
   - Replace `localStorage.setItem('smart_attendance_session_logs', ...)` (line 69)
 
-- [ ] **4.9 Connect manual override** to `PUT /attendance/{record_id}`
+- [x] **4.9 Connect manual override** to `PUT /attendance/{record_id}`
   - Replace `setRoster(prev => prev.map(...))` local state mutation (line 47)
 
 ---

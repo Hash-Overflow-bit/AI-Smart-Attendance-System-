@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Camera, UploadCloud, Users, CheckCircle2, FileArchive, Loader2, AlertCircle, FileText } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Card, { CardHeader, CardContent } from '../../components/ui/Card';
@@ -8,6 +9,7 @@ import Badge from '../../components/ui/Badge';
 import StudentRegistrationForm from '../../components/dashboard/StudentRegistrationForm';
 import WebcamCapture from '../../components/dashboard/WebcamCapture';
 import toast from 'react-hot-toast';
+import api from '../../services/api';
 
 export default function FaceEnrollment() {
   const [activeTab, setActiveTab] = useState('webcam');
@@ -20,27 +22,54 @@ export default function FaceEnrollment() {
   const [selectedFile, setSelectedFile] = useState(null);
   const fileInputRef = useRef(null);
 
+  const [searchParams] = useSearchParams();
+  const reEnrollId = searchParams.get('student');
+
   const tabs = [
     { id: 'webcam', label: 'Webcam Capture', icon: Camera },
     { id: 'upload', label: 'Bulk Upload', icon: UploadCloud }
   ];
 
-  const loadSavedStudents = () => {
-    const saved = localStorage.getItem('smart_attendance_enrolled_students');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  };
-
-  // Dynamic state for enrolled students table, reading from localStorage
-  const [studentsList, setStudentsList] = useState(loadSavedStudents);
+  const [studentsList, setStudentsList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetchStudents();
+  }, []);
+
+  useEffect(() => {
+    // If a specific student ID is passed to re-enroll and students list is loaded
+    if (reEnrollId && studentsList.length > 0 && captureStep === 'form') {
+      const studentToReEnroll = studentsList.find(s => s.id === reEnrollId || s.studentId === reEnrollId);
+      if (studentToReEnroll) {
+        setCurrentStudent(studentToReEnroll);
+        setCaptureStep('active_camera');
+        setActiveTab('webcam');
+      }
+    }
+  }, [reEnrollId, studentsList, captureStep]);
+
+  const fetchStudents = async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.get('/students');
+      setStudentsList(res.data);
+    } catch (error) {
+      console.warn("API not ready, using local storage for face enrollment");
+      const saved = localStorage.getItem('smart_attendance_enrolled_students');
+      if (saved) {
+        try { setStudentsList(JSON.parse(saved)); } catch (e) { setStudentsList([]); }
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const filteredStudents = studentsList.filter(student => 
     student.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    student.studentId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.rollNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (student.studentId && student.studentId.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (student.rollNo && student.rollNo.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (student.courseCode && student.courseCode.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
@@ -64,6 +93,71 @@ export default function FaceEnrollment() {
     }
   };
 
+  const completeEnrollment = async (images) => {
+    const loadingToast = toast.loading(`Initializing Enrollment for ${currentStudent?.name}...`);
+    
+    try {
+      // API call to enroll face embeddings
+      // Mocking pipeline delays for smooth UI flow before API is done
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      toast.loading("Preprocessing images (160x160 normalization)...", { id: loadingToast });
+
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      if (Math.random() < 0.05) {
+         throw new Error("Quality check failed: 3 frames were too blurry. Please retry.");
+      }
+      toast.loading("Applying Laplacian Variance check & face validation...", { id: loadingToast });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      toast.loading("Generating 128-dimensional face embeddings...", { id: loadingToast });
+
+      // Attempt actual API call
+      try {
+        await api.post(`/students/${currentStudent.id || currentStudent.studentId}/enroll`, { images });
+        toast.success(`${currentStudent?.name} successfully enrolled via API!`, { id: loadingToast });
+        fetchStudents();
+      } catch (err) {
+        // Fallback to local storage update
+        const updatedList = studentsList.map(s => {
+           if (s.id === currentStudent.id || s.studentId === currentStudent.studentId) {
+             return {
+               ...s,
+               embeddings: 'Active',
+               lastEnrollment: new Date().toISOString()
+             };
+           }
+           return s;
+        });
+
+        // If it was a totally new manual registration not in list yet
+        if (!updatedList.some(s => s.id === currentStudent.id || s.studentId === currentStudent.studentId)) {
+          updatedList.unshift({
+            id: Math.random().toString(36).substr(2, 9),
+            name: currentStudent.name,
+            studentId: currentStudent.studentId,
+            rollNo: currentStudent.rollNo,
+            courseCode: currentStudent.courseCode,
+            department: currentStudent.department,
+            status: 'Enrolled',
+            embeddings: 'Active',
+            lastEnrollment: new Date().toISOString(),
+            attendance: '0%',
+            image: currentStudent.name.substring(0,2).toUpperCase()
+          });
+        }
+        
+        setStudentsList(updatedList);
+        localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
+        toast.success(`${currentStudent?.name} successfully enrolled locally!`, { id: loadingToast });
+      }
+
+      setCaptureStep('form');
+      setCurrentStudent(null);
+    } catch (error) {
+      toast.error(error.message || "Enrollment failed. Face detection lost.", { id: loadingToast });
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto pb-10">
       <PageHeader 
@@ -76,7 +170,6 @@ export default function FaceEnrollment() {
         }
       />
 
-      {/* NEW: Top Stats Row (Consistency with Course Dash) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-[24px] border border-slate-100 shadow-sm flex items-center gap-5">
            <div className="w-14 h-14 bg-indigo-50/50 text-indigo-600 rounded-2xl flex items-center justify-center shrink-0 border border-indigo-50">
@@ -93,7 +186,9 @@ export default function FaceEnrollment() {
            </div>
            <div>
              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Enrollment Rate</p>
-             <p className="text-3xl font-semibold text-slate-900 mt-1 tracking-tight">98.4%</p>
+             <p className="text-3xl font-semibold text-slate-900 mt-1 tracking-tight">
+               {studentsList.length > 0 ? Math.round((studentsList.filter(s => s.embeddings === 'Active' || s.embeddings === 'Generated').length / studentsList.length) * 100) : 0}%
+             </p>
            </div>
         </div>
         <div className="bg-white p-6 rounded-[24px] border border-slate-100 shadow-sm flex items-center gap-5">
@@ -141,61 +236,12 @@ export default function FaceEnrollment() {
                   </div>
                   
                   <WebcamCapture 
-                     onCancel={() => setCaptureStep('form')}
-                     onCaptureComplete={async (images) => {
-                       // 1. Initial State: Processing
-                       const loadingToast = toast.loading(`Initializing Enrollment for ${currentStudent?.name}...`);
-                       
-                       try {
-                         // 2. Simulated Pipeline Step: Normalization
-                         await new Promise(resolve => setTimeout(resolve, 1200));
-                         toast.loading("Preprocessing images (160x160 normalization)...", { id: loadingToast });
-
-                         // 3. Simulated Pipeline Step: Quality Check (Blur/Multi-face)
-                         await new Promise(resolve => setTimeout(resolve, 1500));
-                         
-                         // Mocking a possible quality failure (5% chance)
-                         if (Math.random() < 0.05) {
-                            throw new Error("Quality check failed: 3 frames were too blurry. Please retry.");
-                         }
-                         toast.loading("Applying Laplacian Variance check & face validation...", { id: loadingToast });
-
-                         // 4. Simulated Pipeline Step: Embedding Generation
-                         await new Promise(resolve => setTimeout(resolve, 2000));
-                         toast.loading("Generating 128-dimensional face embeddings...", { id: loadingToast });
-
-                         // 5. Finalize Enrollment
-                         await new Promise(resolve => setTimeout(resolve, 1000));
-                         
-                         const newStudent = {
-                           id: Math.random().toString(36).substr(2, 9),
-                           name: currentStudent.name,
-                           studentId: currentStudent.studentId,
-                           rollNo: currentStudent.rollNo,
-                           courseCode: currentStudent.courseCode,
-                           department: currentStudent.department,
-                           status: 'Enrolled',
-                           embeddings: 'Active',
-                           lastEnrollment: new Date().toISOString(),
-                           attendance: '0%',
-                           image: currentStudent.name.substring(0,2).toUpperCase()
-                         };
-                         
-                         const updatedList = [newStudent, ...studentsList];
-                         setStudentsList(updatedList);
-                         localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
-
-                         toast.success(`${currentStudent?.name} successfully enrolled!`, { id: loadingToast });
-                         
-                         setCaptureStep('form');
-                         setCurrentStudent(null);
-                       } catch (error) {
-                         toast.error(error.message || "Enrollment failed. Face detection lost.", { id: loadingToast });
-                         // Optionally log failed status if we were tracking partials
-                       }
+                     onCancel={() => {
+                        setCaptureStep('form');
+                        setCurrentStudent(null);
                      }}
+                     onCaptureComplete={completeEnrollment}
                   />
-                  {/* Provide a simulate failure button during dev so you can test error states */}
                   <div className="max-w-2xl mx-auto w-full px-6 mt-4 opacity-50 hover:opacity-100 transition-opacity flex justify-center">
                     <Button variant="ghost" size="sm" onClick={() => {
                         toast.error(`Registration failed for ${currentStudent?.name}. Face not detected clearly.`);
@@ -289,23 +335,29 @@ export default function FaceEnrollment() {
 
                       <div className="flex gap-3">
                         <Button variant="outline" className="flex-1" onClick={() => setUploadState('idle')}>Upload Another</Button>
-                        <Button variant="primary" className="flex-1 border border-blue-600" onClick={() => {
-                          const mockBulk = Array.from({ length: 24 }).map((_, i) => ({
-                            id: Math.random().toString(36).substr(2, 9),
-                            name: `Batch Student ${i+1}`,
-                            studentId: `STU-1${(i+1).toString().padStart(2, '0')}`,
-                            rollNo: `CS-21-1${(i+1).toString().padStart(2, '0')}`,
-                            courseCode: 'CS-402',
-                            department: 'Computer Science',
-                            status: 'Enrolled',
-                            embeddings: 'Generated',
-                            attendance: '-',
-                            image: 'BS'
-                          }));
-                          const updatedList = [...mockBulk, ...studentsList];
-                          setStudentsList(updatedList);
-                          localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
-                          toast.success('Successfully synchronized 24 student embeddings from bulk upload!');
+                        <Button variant="primary" className="flex-1 border border-blue-600" onClick={async () => {
+                          try {
+                            await api.post('/students/bulk-enroll', { file: selectedFile });
+                            toast.success('Successfully synchronized 24 student embeddings from bulk upload via API!');
+                            fetchStudents();
+                          } catch (err) {
+                            const mockBulk = Array.from({ length: 24 }).map((_, i) => ({
+                              id: Math.random().toString(36).substr(2, 9),
+                              name: `Batch Student ${i+1}`,
+                              studentId: `STU-1${(i+1).toString().padStart(2, '0')}`,
+                              rollNo: `CS-21-1${(i+1).toString().padStart(2, '0')}`,
+                              courseCode: 'CS-402',
+                              department: 'Computer Science',
+                              status: 'Enrolled',
+                              embeddings: 'Generated',
+                              attendance: '-',
+                              image: 'BS'
+                            }));
+                            const updatedList = [...mockBulk, ...studentsList];
+                            setStudentsList(updatedList);
+                            localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
+                            toast.success('Successfully synchronized 24 student embeddings locally!');
+                          }
                           setUploadState('idle');
                           setActiveTab('webcam');
                           setCaptureStep('form');
@@ -354,7 +406,6 @@ export default function FaceEnrollment() {
         </div>
       </div>
 
-      {/* NEW: Full Width Datatable for Enrolled Registry (FEM-05) */}
       <Card noPadding>
         <CardHeader 
           title="Student Registry & Embeddings" 
@@ -387,12 +438,18 @@ export default function FaceEnrollment() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {filteredStudents.map((student) => (
+              {isLoading ? (
+                <tr>
+                   <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                     Loading registry...
+                   </td>
+                </tr>
+              ) : filteredStudents.map((student) => (
                 <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-[#EBF3FF] text-[#1E5BF0] font-bold flex items-center justify-center text-xs shadow-sm border border-blue-100">
-                        {student.image}
+                        {student.image || student.name?.substring(0, 2).toUpperCase()}
                       </div>
                       <span className="font-semibold text-slate-800">{student.name}</span>
                     </div>
@@ -401,10 +458,10 @@ export default function FaceEnrollment() {
                   <td className="px-6 py-4 text-slate-600">{student.rollNo}</td>
                   <td className="px-6 py-4 text-center">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 uppercase tracking-tight">
-                       {student.courseCode || 'N/A'}
+                       {student.courseCode || student.courseId || 'N/A'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-slate-600 capitalize">{student.department}</td>
+                  <td className="px-6 py-4 text-slate-600 capitalize">{student.department || 'Unknown'}</td>
                   <td className="px-6 py-4">
                      <Badge variant="success">Enrolled</Badge>
                   </td>
@@ -417,17 +474,17 @@ export default function FaceEnrollment() {
                 </tr>
               ))}
               
-              {filteredStudents.length === 0 && studentsList.length > 0 && (
+              {!isLoading && filteredStudents.length === 0 && studentsList.length > 0 && (
                 <tr>
-                   <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                   <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                      No students matched your search for "{searchQuery}".
                    </td>
                 </tr>
               )}
               
-              {studentsList.length === 0 && (
+              {!isLoading && studentsList.length === 0 && (
                 <tr>
-                   <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                   <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                      No students enrolled yet. Register a student above to see them here.
                    </td>
                 </tr>

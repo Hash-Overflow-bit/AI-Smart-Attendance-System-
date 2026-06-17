@@ -3,6 +3,7 @@ import Webcam from 'react-webcam';
 import Card, { CardContent } from '../../components/ui/Card';
 import { Users, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import api from '../../services/api';
 
 export default function LiveClassroom() {
   const webcamRef = useRef(null);
@@ -10,138 +11,137 @@ export default function LiveClassroom() {
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [faces, setFaces] = useState([]);
-  const [sessionActive, setSessionActive] = useState(true);
+  const [sessionActive, setSessionActive] = useState(false);
   
-  // Dynamic roster loaded from central Student Management registry
-  const [roster, setRoster] = useState(() => {
-    const saved = localStorage.getItem('smart_attendance_enrolled_students');
-    if (saved) {
-      try {
-        return JSON.parse(saved).map(s => ({
-          ...s,
-          status: 'Absent',
-          confidence: 0
-        }));
-      } catch (e) { return []; }
-    }
-    return [
-      { id: '1', studentId: 'STU-1001', name: 'Ali Hamza', status: 'Absent', confidence: 0 },
-      { id: '2', studentId: 'STU-1002', name: 'Ayesha Bibi', status: 'Absent', confidence: 0 }
-    ];
-  });
-
+  // Dynamic roster loaded from API with central fallback
+  const [roster, setRoster] = useState([]);
   const [stats, setStats] = useState({ present: 0, unknown: 0, activeDetections: 0 });
   const [isConnected, setIsConnected] = useState(false);
-  const [isIdle, setIsIdle] = useState(false);
+  const [isIdle, setIsIdle] = useState(true);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [ws, setWs] = useState(null);
 
-  // Requirement 3: System Linkage (Metadata)
-  const sessionMetadata = {
+  const [sessionMetadata, setSessionMetadata] = useState({
     courseId: 'CS-301',
     courseName: 'Deep Learning',
     sessionId: `SESS-${new Date().getTime().toString().slice(-6)}`,
-    startTime: new Date().toLocaleTimeString()
-  };
+    startTime: new Date().toLocaleTimeString(),
+    dbId: null
+  });
 
-  // Handle manual override (Human Control Layer)
-  const toggleAttendance = (studentId) => {
-    setRoster(prev => prev.map(student => 
-      student.studentId === studentId 
-        ? { ...student, status: student.status === 'Present' ? 'Absent' : 'Present' }
-        : student
-    ));
-    toast.success('Manual override applied');
-  };
+  // 1. Load initial roster
+  useEffect(() => {
+    const loadRoster = async () => {
+      try {
+        const res = await api.get('/students');
+        setRoster(res.data.map(s => ({ ...s, status: 'Absent', confidence: 0 })));
+      } catch (err) {
+        const saved = localStorage.getItem('smart_attendance_enrolled_students');
+        if (saved) {
+          try {
+            setRoster(JSON.parse(saved).map(s => ({ ...s, status: 'Absent', confidence: 0 })));
+          } catch (e) {
+            setRoster([
+              { id: '1', studentId: 'STU-1001', name: 'Ali Hamza', status: 'Absent', confidence: 0 },
+              { id: '2', studentId: 'STU-1002', name: 'Ayesha Bibi', status: 'Absent', confidence: 0 }
+            ]);
+          }
+        } else {
+            setRoster([
+              { id: '1', studentId: 'STU-1001', name: 'Ali Hamza', status: 'Absent', confidence: 0 },
+              { id: '2', studentId: 'STU-1002', name: 'Ayesha Bibi', status: 'Absent', confidence: 0 }
+            ]);
+        }
+      }
+    };
+    loadRoster();
+  }, []);
 
-  const endSession = () => {
-    if (window.confirm("Are you sure you want to finalize this session and generate reports?")) {
-      setSessionActive(false);
-      setIsConnected(false);
-
-      // Requirement 6.5: Reporting Module Integration
-      const finalAttendance = {
-        ...sessionMetadata,
-        endTime: new Date().toLocaleTimeString(),
-        stats: { ...stats },
-        roster: roster.map(s => ({ id: s.studentId, name: s.name, status: s.status }))
-      };
-
-      const existingLogs = JSON.parse(localStorage.getItem('smart_attendance_session_logs') || '[]');
-      localStorage.setItem('smart_attendance_session_logs', JSON.stringify([...existingLogs, finalAttendance]));
-
-      toast.success('Session finalized. Attendance logs sent to Reporting Module.');
+  // 2. Initialize Session
+  const startSession = async () => {
+    try {
+      const res = await api.post('/sessions', { course_id: sessionMetadata.courseId });
+      setSessionMetadata(prev => ({ ...prev, dbId: res.data.id }));
+      connectWebSocket(res.data.id);
+    } catch (err) {
+      console.warn("API unavailable, falling back to mock session.");
+      setIsOfflineMode(true);
+      setSessionActive(true);
+      setIsConnected(true);
     }
   };
 
-  // Recognition & Matching Engine (Simulated)
+  const connectWebSocket = (dbId) => {
+    const socket = new WebSocket(`ws://localhost:8000/api/v1/sessions/${dbId}/detect`);
+    
+    socket.onopen = () => {
+      setIsConnected(true);
+      setSessionActive(true);
+      toast.success("Connected to ML Engine");
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.faces) {
+         setFaces(data.faces);
+         setRoster(prev => {
+            const newRoster = [...prev];
+            data.faces.forEach(face => {
+               if (face.status === 'Present') {
+                  const idx = newRoster.findIndex(s => s.studentId === face.studentId);
+                  if (idx >= 0) newRoster[idx].status = 'Present';
+               }
+            });
+            return newRoster;
+         });
+         
+         const unknownCount = data.faces.filter(f => f.status === 'Unknown').length;
+         setStats(prev => ({
+           ...prev,
+           unknown: unknownCount,
+           activeDetections: data.faces.length
+         }));
+         setIsIdle(data.faces.length === 0);
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error("WebSocket Error:", error);
+      setIsOfflineMode(true); // Fallback to mock loop
+      setSessionActive(true);
+      setIsConnected(true);
+    };
+
+    socket.onclose = () => {
+      // Only set disconnected if we aren't falling back to mock mode
+      setIsOfflineMode(prev => {
+        if (!prev) setIsConnected(false);
+        return prev;
+      });
+    };
+
+    setWs(socket);
+  };
+
+  // Start on mount
   useEffect(() => {
-    console.log('Mock recognition engine active');
-    setIsConnected(true);
+    if (!sessionActive && !isOfflineMode) {
+       startSession();
+    }
+    return () => {
+      if (ws) ws.close();
+    }
+  }, []); // eslint-disable-line
 
-    const interval = setInterval(() => {
-      if (!sessionActive) return;
+  // 3. Mock Engine Fallback (When API is down)
+  useEffect(() => {
+    if (!isOfflineMode || !sessionActive) return;
 
-      // Simulate Matching Logic against Enrollment Embeddings
-      const activeStudents = roster.filter(s => s.status === 'Absent');
-      const numDetections = Math.floor(Math.random() * 4); // 0-3 people in frame
-      
-      const mockFaces = [];
-      let unknownCount = 0;
-
-      for (let i = 0; i < numDetections; i++) {
-        const isKnown = Math.random() > 0.4 && activeStudents.length > 0;
-        
-        if (isKnown) {
-          const randomIndex = Math.floor(Math.random() * activeStudents.length);
-          const student = activeStudents[randomIndex];
-          
-          mockFaces.push({
-            status: 'Present',
-            studentId: student.studentId,
-            confidence: 0.85 + Math.random() * 0.12, // High confidence threshold
-            x: 10 + Math.random() * 60,
-            y: 20 + Math.random() * 50,
-            width: 20,
-            height: 30
-          });
-
-          // Auto-Marking Logic (Duplicate Prevention built-in by roster update)
-          setRoster(prev => prev.map(s => 
-            s.studentId === student.studentId ? { ...s, status: 'Present' } : s
-          ));
-        } else {
-          unknownCount++;
-          mockFaces.push({
-            status: 'Unknown',
-            confidence: 0.45 + Math.random() * 0.2,
-            x: Math.random() * 70,
-            y: Math.random() * 60,
-            width: 18,
-            height: 28
-          });
-        }
-      }
-
-      setFaces(mockFaces);
-      setStats(prev => ({
-        ...prev,
-        unknown: unknownCount,
-        activeDetections: numDetections
-      }));
-
-      // Requirement 6.4: Alert System Trigger
-      if (unknownCount > 0 && Math.random() > 0.8) {
-        toast.error(`Alert: ${unknownCount} Unknown face(s) detected!`, {
-          icon: '⚠️',
-          style: { borderRadius: '10px', background: '#333', color: '#fff' }
-        });
-      }
-
-      // Requirement 5: System Health (Idle Logic)
-      setIsIdle(numDetections === 0);
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [roster, sessionActive]);
+    // Just keep the camera open and live without any fake bounding boxes.
+    // The ML detection will be handled by the backend engineer's WebSocket later.
+    setIsIdle(false);
+    
+  }, [isOfflineMode, sessionActive]);
 
   // Sync Global Stats
   useEffect(() => {
@@ -149,25 +149,72 @@ export default function LiveClassroom() {
     setStats(prev => ({ ...prev, present: presentCount }));
   }, [roster]);
 
-  // Frame processing loop (mocked for frontend only)
+  // Frame pushing (only if real WebSocket is active)
   const captureAndSendFrame = useCallback(() => {
-    if (isProcessing) return; // Wait for the previous frame to finish
-
+    if (isProcessing || isOfflineMode || ws?.readyState !== WebSocket.OPEN) return;
     const imageSrc = webcamRef.current?.getScreenshot();
     if (imageSrc) {
-      // Simulate frame processing delay
       setIsProcessing(true);
-      setTimeout(() => setIsProcessing(false), 300);
+      ws.send(JSON.stringify({ type: 'frame', image: imageSrc }));
+      setTimeout(() => setIsProcessing(false), 200);
     }
-  }, [isProcessing]);
+  }, [isProcessing, ws, isOfflineMode]);
 
   useEffect(() => {
     let interval;
-    if (isConnected) {
-      interval = setInterval(captureAndSendFrame, 200); // 5 FPS to keep load light
+    if (isConnected && !isOfflineMode) {
+      interval = setInterval(captureAndSendFrame, 200);
     }
     return () => clearInterval(interval);
-  }, [captureAndSendFrame, isConnected]);
+  }, [captureAndSendFrame, isConnected, isOfflineMode]);
+
+  // 4. Handle manual override
+  const toggleAttendance = async (studentId) => {
+    try {
+      const student = roster.find(s => s.studentId === studentId);
+      const newStatus = student.status === 'Present' ? 'Absent' : 'Present';
+      
+      if (!isOfflineMode && sessionMetadata.dbId) {
+         await api.put(`/attendance/${student.id}`, { status: newStatus, override: true });
+      }
+      setRoster(prev => prev.map(s => s.studentId === studentId ? { ...s, status: newStatus } : s));
+      toast.success('Manual override applied');
+    } catch (error) {
+      console.warn("API unavailable, updating locally.", error);
+      const student = roster.find(s => s.studentId === studentId);
+      const newStatus = student.status === 'Present' ? 'Absent' : 'Present';
+      setRoster(prev => prev.map(s => s.studentId === studentId ? { ...s, status: newStatus } : s));
+      toast.success('Manual override applied (Local)');
+    }
+  };
+
+  // 5. End Session
+  const endSession = async () => {
+    if (window.confirm("Are you sure you want to finalize this session and generate reports?")) {
+      setSessionActive(false);
+      setIsConnected(false);
+      if (ws) ws.close();
+
+      const finalAttendance = {
+        ...sessionMetadata,
+        endTime: new Date().toLocaleTimeString(),
+        stats: { ...stats },
+        roster: roster.map(s => ({ id: s.studentId, name: s.name, status: s.status }))
+      };
+
+      try {
+        if (!isOfflineMode && sessionMetadata.dbId) {
+           await api.put(`/sessions/${sessionMetadata.dbId}/close`, finalAttendance);
+        }
+      } catch (err) {
+        console.warn("API unavailable, saving to local storage.");
+      } finally {
+        const existingLogs = JSON.parse(localStorage.getItem('smart_attendance_session_logs') || '[]');
+        localStorage.setItem('smart_attendance_session_logs', JSON.stringify([...existingLogs, finalAttendance]));
+        toast.success('Session finalized. Attendance logs saved.');
+      }
+    }
+  };
 
   // Draw bounding boxes
   useEffect(() => {
@@ -177,21 +224,16 @@ export default function LiveClassroom() {
     const video = webcamRef.current.video;
     const ctx = canvas.getContext('2d');
 
-    // Match canvas dimensions to video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-
-    // Clear previous drawings
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     faces.forEach(face => {
-      // Calculate absolute positions based on percentages
       const x = (face.x / 100) * canvas.width;
       const y = (face.y / 100) * canvas.height;
       const width = (face.width / 100) * canvas.width;
       const height = (face.height / 100) * canvas.height;
 
-      // Draw bounding box
       ctx.lineWidth = 3;
       if (face.status === 'Present') {
         ctx.strokeStyle = '#22c55e'; // Green
@@ -201,20 +243,16 @@ export default function LiveClassroom() {
         ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
       }
 
-      // Box
       ctx.beginPath();
       ctx.roundRect(x, y, width, height, 8);
       ctx.stroke();
       ctx.fill();
 
-      // Label
       ctx.fillStyle = face.status === 'Present' ? '#22c55e' : '#ef4444';
       const labelText = face.status === 'Present' ? `✓ ${face.studentId}` : '⚠ Unknown';
       
-      // Background for text
       ctx.fillRect(x, y - 30, ctx.measureText(labelText).width + 20, 24);
       
-      // Text
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 14px Inter, sans-serif';
       ctx.fillText(labelText, x + 10, y - 13);
@@ -231,16 +269,18 @@ export default function LiveClassroom() {
         <div className="flex items-center gap-3">
           <div className={`px-4 py-2 rounded-full flex items-center gap-3 text-sm font-semibold shadow-sm transition-all ${
             !isConnected ? 'bg-rose-50 text-rose-600 border border-rose-100' :
-            isIdle ? 'bg-amber-50 text-amber-600 border border-amber-100' : 
+            isOfflineMode ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+            isIdle ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 
             'bg-emerald-50 text-emerald-600 border border-emerald-100'
           }`}>
             <div className={`w-2.5 h-2.5 rounded-full ${
               !isConnected ? 'bg-rose-500' :
-              isIdle ? 'bg-amber-500' : 
+              isOfflineMode ? 'bg-amber-500 animate-pulse' :
+              isIdle ? 'bg-indigo-500' : 
               'bg-emerald-500 animate-pulse'
             }`} />
             <div className="flex flex-col leading-none">
-               <span>{isConnected ? (isIdle ? 'ML Engine: IDLE' : 'ML Engine: RUNNING') : 'System Disconnected'}</span>
+               <span>{isConnected ? (isOfflineMode ? 'ML Engine: MOCK MODE' : (isIdle ? 'ML Engine: IDLE' : 'ML Engine: RUNNING')) : 'System Disconnected'}</span>
                {isConnected && <span className="text-[10px] opacity-70 mt-1 uppercase tracking-tighter">Cam: 1280x720 @ 30fps</span>}
             </div>
           </div>
@@ -323,7 +363,7 @@ export default function LiveClassroom() {
                          </span>
                          {/* Manual Override Toggle */}
                          <button 
-                            onClick={() => toggleAttendance(student.id)}
+                            onClick={() => toggleAttendance(student.studentId)}
                             className={`w-10 h-6 rounded-full relative transition-colors ${student.status === 'Present' ? 'bg-emerald-500' : 'bg-slate-300'}`}
                          >
                             <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${student.status === 'Present' ? 'translate-x-4' : 'translate-x-0'}`} />

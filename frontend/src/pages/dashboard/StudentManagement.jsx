@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Users, 
   UserPlus, 
@@ -9,7 +10,8 @@ import {
   AlertCircle, 
   CheckCircle2,
   Filter,
-  Download
+  Download,
+  Camera
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
@@ -18,13 +20,16 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Badge from '../../components/ui/Badge';
 import toast from 'react-hot-toast';
+import api from '../../services/api';
 
 export default function StudentManagement() {
   const [students, setStudents] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [bulkUploadError, setBulkUploadError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   const fileInputRef = useRef(null);
+  const navigate = useNavigate();
 
   // New Student Form State
   const [newStudent, setNewStudent] = useState({
@@ -38,31 +43,71 @@ export default function StudentManagement() {
   const [courses, setCourses] = useState([]);
   const [attendanceLogs, setAttendanceLogs] = useState([]);
 
-  // Load data from localStorage on mount
   useEffect(() => {
-    // Load Students
-    const savedStudents = localStorage.getItem('smart_attendance_enrolled_students');
-    if (savedStudents) {
-      try { setStudents(JSON.parse(savedStudents)); } catch (e) { setStudents([]); }
-    }
-
-    // Requirement 8.1: Load Courses
-    const savedCourses = localStorage.getItem('smart_attendance_courses');
-    if (savedCourses) {
-      try { setCourses(JSON.parse(savedCourses)); } catch (e) { setCourses([]); }
-    }
-
-    // Requirement 8.2: Load Attendance Logs for calculation
-    const savedLogs = localStorage.getItem('smart_attendance_session_logs');
-    if (savedLogs) {
-      try { setAttendanceLogs(JSON.parse(savedLogs)); } catch (e) { setAttendanceLogs([]); }
-    }
+    fetchData();
   }, []);
 
-  // Requirement 8.2: Calculate dynamic attendance for a student
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      // Try fetching from API first
+      const [studentsRes, coursesRes, logsRes] = await Promise.all([
+        api.get('/students').catch(() => null),
+        api.get('/courses').catch(() => null),
+        api.get('/sessions').catch(() => null)
+      ]);
+
+      if (studentsRes) {
+        setStudents(studentsRes.data);
+      } else {
+        loadStudentsFromLocal();
+      }
+
+      if (coursesRes) {
+        setCourses(coursesRes.data);
+      } else {
+        loadCoursesFromLocal();
+      }
+
+      if (logsRes) {
+        setAttendanceLogs(logsRes.data);
+      } else {
+        loadLogsFromLocal();
+      }
+    } catch (error) {
+      console.warn("API not ready, falling back to local storage");
+      loadStudentsFromLocal();
+      loadCoursesFromLocal();
+      loadLogsFromLocal();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadStudentsFromLocal = () => {
+    const saved = localStorage.getItem('smart_attendance_enrolled_students');
+    if (saved) {
+      try { setStudents(JSON.parse(saved)); } catch (e) { setStudents([]); }
+    }
+  };
+
+  const loadCoursesFromLocal = () => {
+    const saved = localStorage.getItem('smart_attendance_courses');
+    if (saved) {
+      try { setCourses(JSON.parse(saved)); } catch (e) { setCourses([]); }
+    }
+  };
+
+  const loadLogsFromLocal = () => {
+    const saved = localStorage.getItem('smart_attendance_session_logs');
+    if (saved) {
+      try { setAttendanceLogs(JSON.parse(saved)); } catch (e) { setAttendanceLogs([]); }
+    }
+  };
+
   const calculateAttendance = (studentId) => {
     const studentLogs = attendanceLogs.filter(log => 
-      log.roster.some(s => s.id === studentId)
+      log.roster && log.roster.some(s => s.id === studentId)
     );
     
     if (studentLogs.length === 0) return 0;
@@ -74,13 +119,11 @@ export default function StudentManagement() {
     return Math.round((presentCount / studentLogs.length) * 100);
   };
 
-  // Save to localStorage whenever students list changes
-  const saveStudents = (updatedList) => {
+  const saveStudentsLocal = (updatedList) => {
     setStudents(updatedList);
     localStorage.setItem('smart_attendance_enrolled_students', JSON.stringify(updatedList));
   };
 
-  // Validation: Check if rollNo is unique
   const isRollNoUnique = (rollNo, excludeId = null) => {
     return !students.some(s => s.rollNo.toLowerCase() === rollNo.toLowerCase() && s.id !== excludeId);
   };
@@ -90,12 +133,10 @@ export default function StudentManagement() {
   };
 
   const validateRollNo = (rollNo) => {
-    // Basic format check: e.g., CS-21-140 or BESE-10C (Non-empty and alphanumeric/hyphen)
     return /^[a-zA-Z0-9-]+$/.test(rollNo);
   };
 
-  // Add/Update Single Student
-  const handleAddStudent = (e) => {
+  const handleAddStudent = async (e) => {
     e.preventDefault();
     
     if (!newStudent.name || !newStudent.rollNo || !newStudent.email || !newStudent.courseId) {
@@ -118,24 +159,31 @@ export default function StudentManagement() {
       return;
     }
 
-    const studentToAdd = {
-      ...newStudent,
-      id: Math.random().toString(36).substr(2, 9),
-      studentId: `STU-${newStudent.rollNo}`,
-      status: 'Pending Enrollment', // Requirement 8.3: Start as Pending
-      embeddings: 'Pending',
-      attendance: '0%',
-      image: newStudent.name.substring(0, 2).toUpperCase()
-    };
+    try {
+      // Attempt API first
+      await api.post('/students', newStudent);
+      toast.success("Student created via API");
+      fetchData(); // reload from API
+    } catch (error) {
+      // Fallback to local storage
+      const studentToAdd = {
+        ...newStudent,
+        id: Math.random().toString(36).substr(2, 9),
+        studentId: `STU-${newStudent.rollNo}`,
+        status: 'Pending Enrollment',
+        embeddings: 'Pending',
+        attendance: '0%',
+        image: newStudent.name.substring(0, 2).toUpperCase()
+      };
+      saveStudentsLocal([studentToAdd, ...students]);
+      toast.success("Student record created locally (fallback)!");
+    }
 
-    saveStudents([studentToAdd, ...students]);
     setNewStudent({ name: '', rollNo: '', email: '', courseId: '', department: 'computer' });
     setIsAddModalOpen(false);
-    toast.success("Student record created successfully!");
   };
 
-  // Bulk Upload CSV Parser
-  const handleCSVUpload = (e) => {
+  const handleCSVUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -144,88 +192,104 @@ export default function StudentManagement() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target.result;
-      const lines = content.split('\n');
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      
-      const newEntries = [];
-      const errors = [];
+    try {
+       const formData = new FormData();
+       formData.append('file', file);
+       const res = await api.post('/students/bulk-import', formData);
+       toast.success(`API Import: ${res.data.imported} students imported`);
+       fetchData();
+    } catch (error) {
+       console.warn("API bulk import failed, using local parser");
+       // Local Parsing Fallback
+       const reader = new FileReader();
+       reader.onload = (event) => {
+         const content = event.target.result;
+         const lines = content.split('\n');
+         const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+         
+         const newEntries = [];
+         const errors = [];
 
-      // Expected headers: name, rollno, email, courseid
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        
-        const values = lines[i].split(',').map(v => v.trim());
-        const entry = {};
-        
-        headers.forEach((header, index) => {
-          if (header === 'name') entry.name = values[index];
-          if (header === 'rollno') entry.rollNo = values[index];
-          if (header === 'email') entry.email = values[index];
-          if (header === 'courseid') entry.courseId = values[index];
-        });
+         for (let i = 1; i < lines.length; i++) {
+           if (!lines[i].trim()) continue;
+           
+           const values = lines[i].split(',').map(v => v.trim());
+           const entry = {};
+           
+           headers.forEach((header, index) => {
+             if (header === 'name') entry.name = values[index];
+             if (header === 'rollno') entry.rollNo = values[index];
+             if (header === 'email') entry.email = values[index];
+             if (header === 'courseid') entry.courseId = values[index];
+           });
 
-        // Validation for each row
-        if (!entry.name || !entry.rollNo || !entry.email || !entry.courseId) {
-          errors.push(`Row ${i + 1}: Missing required fields`);
-          continue;
-        }
+           if (!entry.name || !entry.rollNo || !entry.email || !entry.courseId) {
+             errors.push(`Row ${i + 1}: Missing required fields`);
+             continue;
+           }
 
-        if (!isRollNoUnique(entry.rollNo) && !newEntries.some(e => e.rollNo === entry.rollNo)) {
-          // Check against current state AND newly parsed entries to avoid duplicates in same file
-          errors.push(`Row ${i + 1}: Roll number ${entry.rollNo} is a duplicate`);
-          continue;
-        }
+           if (!isRollNoUnique(entry.rollNo) && !newEntries.some(e => e.rollNo === entry.rollNo)) {
+             errors.push(`Row ${i + 1}: Roll number ${entry.rollNo} is a duplicate`);
+             continue;
+           }
 
-        if (newEntries.some(e => e.rollNo === entry.rollNo)) {
-           errors.push(`Row ${i + 1}: Roll number ${entry.rollNo} repeated in file`);
-           continue;
-        }
+           if (newEntries.some(e => e.rollNo === entry.rollNo)) {
+              errors.push(`Row ${i + 1}: Roll number ${entry.rollNo} repeated in file`);
+              continue;
+           }
 
-        newEntries.push({
-          ...entry,
-          id: Math.random().toString(36).substr(2, 9),
-          studentId: `STU-${entry.rollNo}`,
-          department: 'computer',
-          status: 'Enrolled',
-          embeddings: 'Pending',
-          attendance: '0%',
-          image: entry.name.substring(0, 2).toUpperCase()
-        });
-      }
+           newEntries.push({
+             ...entry,
+             id: Math.random().toString(36).substr(2, 9),
+             studentId: `STU-${entry.rollNo}`,
+             department: 'computer',
+             status: 'Enrolled',
+             embeddings: 'Pending',
+             attendance: '0%',
+             image: entry.name.substring(0, 2).toUpperCase()
+           });
+         }
 
-      if (errors.length > 0) {
-        setBulkUploadError(errors);
-        toast.error(`Found ${errors.length} errors in CSV`);
-      } else {
-        setBulkUploadError(null);
-      }
+         if (errors.length > 0) {
+           setBulkUploadError(errors);
+           toast.error(`Found ${errors.length} errors in CSV`);
+         } else {
+           setBulkUploadError(null);
+         }
 
-      if (newEntries.length > 0) {
-        saveStudents([...newEntries, ...students]);
-        toast.success(`Successfully imported ${newEntries.length} students`);
-      }
-      
-      // Reset input
-      e.target.value = '';
-    };
-    reader.readAsText(file);
+         if (newEntries.length > 0) {
+           saveStudentsLocal([...newEntries, ...students]);
+           toast.success(`Successfully imported ${newEntries.length} students locally`);
+         }
+       };
+       reader.readAsText(file);
+    }
+    e.target.value = '';
   };
 
-  const handleDeleteStudent = (id) => {
+  const handleDeleteStudent = async (id) => {
     if (window.confirm("Are you sure you want to remove this student?")) {
-      saveStudents(students.filter(s => s.id !== id));
-      toast.success("Student removed");
+      try {
+        await api.delete(`/students/${id}`);
+        toast.success("Student removed via API");
+        fetchData();
+      } catch (error) {
+        saveStudentsLocal(students.filter(s => s.id !== id));
+        toast.success("Student removed locally (fallback)");
+      }
     }
+  };
+
+  const handleReEnroll = (studentId) => {
+    // Navigate to enrollment page with the student ID selected
+    navigate(`/dashboard/enrollment?student=${studentId}`);
   };
 
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.rollNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.courseId.toLowerCase().includes(searchQuery.toLowerCase())
+    (s.courseId && s.courseId.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (
@@ -268,7 +332,7 @@ export default function StudentManagement() {
             <div className="pt-4 border-t border-slate-50">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Unique Courses</p>
               <h3 className="text-xl font-bold text-slate-800">
-                {[...new Set(students.map(s => s.courseId))].length}
+                {[...new Set(students.map(s => s.courseId).filter(Boolean))].length}
               </h3>
             </div>
             <div className="pt-6">
@@ -331,16 +395,22 @@ export default function StudentManagement() {
                     <th className="px-6 py-4">Course ID</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4">Attendance</th>
-                    <th className="px-6 py-4">Actions</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredStudents.map((student) => (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-slate-400 text-sm">
+                        Loading students...
+                      </td>
+                    </tr>
+                  ) : filteredStudents.map((student) => (
                     <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 font-bold flex items-center justify-center text-[11px] border border-blue-100">
-                            {student.image}
+                            {student.image || student.name?.substring(0,2).toUpperCase()}
                           </div>
                           <span className="font-bold text-slate-800 text-sm">{student.name}</span>
                         </div>
@@ -348,7 +418,7 @@ export default function StudentManagement() {
                       <td className="px-6 py-4 text-sm font-medium text-slate-600">{student.rollNo}</td>
                       <td className="px-6 py-4 text-sm text-slate-500">{student.email}</td>
                       <td className="px-6 py-4">
-                        <Badge variant="primary" className="uppercase">{student.courseId}</Badge>
+                        <Badge variant="primary" className="uppercase">{student.courseId || 'Unassigned'}</Badge>
                       </td>
                       <td className="px-6 py-4">
                         {student.embeddings === 'Active' || student.embeddings === 'Generated' ? (
@@ -377,18 +447,27 @@ export default function StudentManagement() {
                            </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <button 
-                          onClick={() => handleDeleteStudent(student.id)}
-                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => handleReEnroll(student.id)}
+                            className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"
+                            title="Re-enroll Face"
+                          >
+                            <Camera className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteStudent(student.id)}
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                            title="Remove Student"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
-
                     </tr>
                   ))}
-                  {filteredStudents.length === 0 && (
+                  {!isLoading && filteredStudents.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-6 py-12 text-center text-slate-400 text-sm">
                         No students found matching your criteria.
